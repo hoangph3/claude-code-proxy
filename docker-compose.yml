@@ -1,0 +1,45 @@
+# Run the proxy as a service.
+#
+# The one thing to get right here is the credential. The proxy holds a real Claude
+# subscription, and the way it holds it is a file — `.claude/.credentials.json` inside the
+# mounted HOME — seeded once from an authenticated `claude` login on the host. Nothing in
+# this repository contains it, and nothing should: see `claude-home/README` after the first
+# run.
+
+services:
+  claude-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: claude-code-proxy:1.0.0
+    container_name: claude-proxy
+    restart: unless-stopped
+
+    ports:
+      # Bound to loopback, NOT 0.0.0.0. Anything that reaches this port can spend the
+      # subscription behind it, and `REQUIRE_AUTH` is one env var away from being turned
+      # off by accident. Reach it from another container over a shared network by name
+      # instead, or publish it deliberately once you have decided who may.
+      - "127.0.0.1:${CLAUDE_PROXY_PORT:-4523}:4523"
+
+    volumes:
+      # The CLI's HOME. Writable because the CLI refreshes its OAuth token in place — a
+      # read-only mount works until the access token expires and then fails as an auth
+      # error that says nothing about mounts.
+      - ${CLAUDE_PROXY_HOME:-./claude-home}:/claude-home
+
+    environment:
+      # The key CLIENTS send. Not an Anthropic key: the real credential is the mounted
+      # token file, and this only decides who may spend it. Required — with `REQUIRE_AUTH`
+      # true and no keys configured the proxy would refuse every request, and with auth off
+      # it would accept every one.
+      PROXY_API_KEYS: ${CLAUDE_PROXY_API_KEYS:?set CLAUDE_PROXY_API_KEYS}
+      REQUIRE_AUTH: "true"
+
+      # Ten minutes, not the upstream five. A turn with client-side tool calls is several
+      # CLI turns end to end, each replaying the conversation, and cutting one off mid-way
+      # loses the whole turn rather than part of it.
+      REQUEST_TIMEOUT_MS: ${CLAUDE_PROXY_TIMEOUT_MS:-600000}
+
+      DEFAULT_MODEL: ${CLAUDE_PROXY_DEFAULT_MODEL:-sonnet}
+      LOG_LEVEL: ${CLAUDE_PROXY_LOG_LEVEL:-info}

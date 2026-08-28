@@ -2,3 +2,7 @@ node_modules/
 dist/
 .env
 *.tgz
+
+# The CLI's HOME when running under docker compose. Holds .claude/.credentials.json —
+# a live subscription token. Never committed.
+claude-home/
