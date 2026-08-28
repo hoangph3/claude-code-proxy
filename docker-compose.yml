@@ -1,10 +1,24 @@
 # Run the proxy as a service.
 #
 # The one thing to get right here is the credential. The proxy holds a real Claude
-# subscription, and the way it holds it is a file — `.claude/.credentials.json` inside the
-# mounted HOME — seeded once from an authenticated `claude` login on the host. Nothing in
-# this repository contains it, and nothing should: see `claude-home/README` after the first
-# run.
+# subscription, and there are two ways to give it one — pick ONE:
+#
+#   * `CLAUDE_CODE_OAUTH_TOKEN` — a long-lived token from `claude setup-token`. Simplest,
+#     and the only option when nobody can log in interactively on the host.
+#   * the mounted HOME — `.claude/.credentials.json` plus `.claude.json`, seeded from an
+#     authenticated `claude` login. The CLI refreshes the token in place, so the mount must
+#     be writable.
+#
+# The second needs BOTH files: with `.credentials.json` alone the CLI has no session state,
+# and once its access token has expired there is nothing to refresh against.
+#
+# Either way the failure is silent. The proxy builds the CLI's environment from an
+# allow-list (`src/cli/subprocess.ts`), so an unauthenticated CLI exits 1 without writing a
+# word to stderr and the proxy answers 200 with empty content. Running `claude` by hand in
+# the same container still works — it inherits the real environment — which makes the
+# problem look like the proxy's flags rather than its credential. Prefer the token.
+#
+# Nothing in this repository contains either. Nothing should.
 
 services:
   claude-proxy:
@@ -40,6 +54,10 @@ services:
       # CLI turns end to end, each replaying the conversation, and cutting one off mid-way
       # loses the whole turn rather than part of it.
       REQUEST_TIMEOUT_MS: ${CLAUDE_PROXY_TIMEOUT_MS:-600000}
+
+      # The subscription itself. Empty is valid: the CLI then falls back to the mounted
+      # HOME, which is the other path described at the top of this file.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
 
       DEFAULT_MODEL: ${CLAUDE_PROXY_DEFAULT_MODEL:-sonnet}
       LOG_LEVEL: ${CLAUDE_PROXY_LOG_LEVEL:-info}

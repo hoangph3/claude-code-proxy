@@ -28,6 +28,17 @@ export function spawnCli(args: string[], prompt: string, timeoutMs: number, extr
       XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
       XDG_DATA_HOME: process.env.XDG_DATA_HOME,
       CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
+
+      // The subscription. This env is an ALLOW-LIST, not an inherited environment, so a
+      // variable that is not named here does not reach the CLI — and a missing credential
+      // is not an error the CLI reports: it exits 1 having written nothing at all, and the
+      // proxy answers 200 with empty content. `docker exec claude ...` in the same
+      // container still works, because that inherits the real environment, which makes the
+      // failure look like the proxy's flags rather than its env.
+      CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
+      ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
       ...extraEnv,
     },
   });
