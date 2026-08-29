@@ -9,9 +9,28 @@ export interface SubprocessResult {
   process: ChildProcess;
 }
 
-export function spawnCli(args: string[], prompt: string, timeoutMs: number, extraEnv?: Record<string, string>): SubprocessResult {
+export function spawnCli(
+  args: string[],
+  prompt: string,
+  timeoutMs: number,
+  extraEnv?: Record<string, string>,
+  cleanup?: () => void,
+): SubprocessResult {
   const command = args[0];
   const spawnArgs = args.slice(1);
+
+  // Runs on exit AND on a spawn that never happened — E2BIG arrives as an 'error' event, so
+  // hanging cleanup off exit alone would leak the very files written to avoid it.
+  let cleaned = false;
+  const cleanUpOnce = (): void => {
+    if (cleaned) return;
+    cleaned = true;
+    try {
+      cleanup?.();
+    } catch {
+      // Never let tidying up mask the result of the request.
+    }
+  };
 
   logger.debug('Spawning CLI', { command, args: spawnArgs });
 
@@ -103,6 +122,7 @@ export function spawnCli(args: string[], prompt: string, timeoutMs: number, extr
   proc.on('exit', (code, signal) => {
     clearTimeout(timeoutId);
     clearTimeout(forceKillId);
+    cleanUpOnce();
     logger.debug('CLI process exited', { code, signal, pid: proc.pid });
     if (code !== 0 && code !== null && !killed) {
       logger.error('CLI process exited with error', {
@@ -115,6 +135,7 @@ export function spawnCli(args: string[], prompt: string, timeoutMs: number, extr
 
   proc.on('error', (err) => {
     clearTimeout(timeoutId);
+    cleanUpOnce();
     logger.error('CLI process error', {
       error: err.message,
       code: (err as NodeJS.ErrnoException).code,

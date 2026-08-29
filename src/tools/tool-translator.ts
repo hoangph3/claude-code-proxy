@@ -1,7 +1,4 @@
 import type { AnthropicToolDefinition } from '../protocol/anthropic-types.js';
-import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 
 export interface McpConfig {
   mcpServers: Record<string, {
@@ -28,6 +25,9 @@ export function buildMcpConfig(
       client_tools: {
         command: 'node',
         args: [bridgeScriptPath],
+        // Inline here; buildArgs moves it to a file when it is too large to be an
+        // environment variable. That decision lives there because the same limit applies to
+        // the CLI's own arguments, and one place should own it.
         env: {
           TOOL_DEFINITIONS: toolDefs,
         },
@@ -36,27 +36,6 @@ export function buildMcpConfig(
   };
 
   return { mcpConfig, toolDefs };
-}
-
-/**
- * Write an MCP config to a temporary file for the CLI to read.
- * Returns the file path and a cleanup function.
- */
-export function writeTempMcpConfig(mcpConfig: McpConfig): { configPath: string; cleanup: () => void } {
-  const tempDir = mkdtempSync(join(tmpdir(), 'claude-proxy-'));
-  const configPath = join(tempDir, 'mcp-config.json');
-  writeFileSync(configPath, JSON.stringify(mcpConfig), 'utf-8');
-
-  return {
-    configPath,
-    cleanup: () => {
-      try {
-        rmSync(tempDir, { recursive: true, force: true });
-      } catch {
-        // Ignore cleanup errors
-      }
-    },
-  };
 }
 
 /**

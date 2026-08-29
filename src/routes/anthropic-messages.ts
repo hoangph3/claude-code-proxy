@@ -47,7 +47,7 @@ export async function handleMessages(
   const cliArgs = translateAnthropicRequest(body);
   cliArgs.enableThinking = enableThinking;
 
-  const { args, prompt, extraEnv } = buildArgs(cliArgs, config);
+  const { args, prompt, extraEnv, cleanup } = buildArgs(cliArgs, config);
 
   logger.debug('Spawning CLI for Anthropic request', {
     model: body.model,
@@ -55,7 +55,7 @@ export async function handleMessages(
     messageCount: body.messages.length,
   });
 
-  const { events, kill } = spawnCli(args, prompt, config.requestTimeoutMs, extraEnv);
+  const { events, kill } = spawnCli(args, prompt, config.requestTimeoutMs, extraEnv, cleanup);
 
   // Kill subprocess on client disconnect
   req.on('close', () => {

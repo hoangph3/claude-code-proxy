@@ -1,6 +1,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { readFileSync } from 'node:fs';
 
 interface ToolDefinition {
   name: string;
@@ -14,7 +15,10 @@ interface ToolDefinition {
  * Runs as a child process, speaking MCP stdio protocol.
  * The CLI connects to this server to discover and call tools.
  *
- * Tool definitions are passed via the TOOL_DEFINITIONS environment variable.
+ * Tool definitions arrive by file (TOOL_DEFINITIONS_FILE) when there are enough of them to
+ * matter, and inline (TOOL_DEFINITIONS) otherwise. The file is not an optimisation: an
+ * environment variable is capped at MAX_ARG_STRLEN, 128 KiB, so a large enough tool set
+ * makes the CLI fail to spawn this bridge at all.
  *
  * Uses the low-level Server API so that JSON Schema input_schema objects are
  * passed through directly, instead of being converted via Zod (which would
@@ -27,9 +31,20 @@ interface ToolDefinition {
  */
 
 async function main(): Promise<void> {
-  const toolDefsJson = process.env.TOOL_DEFINITIONS;
+  const toolDefsFile = process.env.TOOL_DEFINITIONS_FILE;
+  let toolDefsJson: string | undefined;
+  if (toolDefsFile) {
+    try {
+      toolDefsJson = readFileSync(toolDefsFile, 'utf-8');
+    } catch (err) {
+      process.stderr.write(`ERROR: cannot read TOOL_DEFINITIONS_FILE ${toolDefsFile}: ${err}\n`);
+      process.exit(1);
+    }
+  } else {
+    toolDefsJson = process.env.TOOL_DEFINITIONS;
+  }
   if (!toolDefsJson) {
-    process.stderr.write('ERROR: TOOL_DEFINITIONS environment variable not set\n');
+    process.stderr.write('ERROR: neither TOOL_DEFINITIONS_FILE nor TOOL_DEFINITIONS is set\n');
     process.exit(1);
   }
 

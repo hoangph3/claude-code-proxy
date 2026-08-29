@@ -1,6 +1,23 @@
 import type { Config, McpServerDefinition } from '../config.js';
 import { toCliModel, validateEffort } from '../translation/model-map.js';
 import { badRequest } from '../util/errors.js';
+import { tempFiles } from '../util/temp-files.js';
+
+/**
+ * Linux caps a single argv entry or environment variable at MAX_ARG_STRLEN — 128 KiB, and
+ * not raisable. Past it `spawn` fails with E2BIG before the CLI runs, which this proxy can
+ * only report as a 500 with no useful detail. Measured: a request carrying 120 KB of tool
+ * schemas succeeded, 131 KB failed, which is that limit to the byte.
+ *
+ * Anything longer than this goes to a file instead; the CLI takes a path everywhere it
+ * takes one of these blobs. Well below the ceiling on purpose, because several of these
+ * share one command line and the total has its own (much larger) limit.
+ */
+const MAX_INLINE_BYTES = 32 * 1024;
+
+function tooBig(value: string): boolean {
+  return Buffer.byteLength(value, 'utf8') > MAX_INLINE_BYTES;
+}
 
 export interface CliArgs {
   /** The system prompt, if any */
@@ -25,10 +42,13 @@ export interface BuiltCliCommand {
   args: string[];
   prompt: string;
   extraEnv?: Record<string, string>;
+  /** Removes anything this call had to spill to disk. Call it once the CLI has exited. */
+  cleanup: () => void;
 }
 
 export function buildArgs(cliArgs: CliArgs, config: Config): BuiltCliCommand {
   const cliModel = toCliModel(cliArgs.model);
+  const temp = tempFiles();
 
   const args: string[] = [
     config.claudePath,
@@ -49,7 +69,11 @@ export function buildArgs(cliArgs: CliArgs, config: Config): BuiltCliCommand {
 
   // System prompt
   if (cliArgs.systemPrompt) {
-    args.push('--system-prompt', cliArgs.systemPrompt);
+    if (tooBig(cliArgs.systemPrompt)) {
+      args.push('--system-prompt-file', temp.write('system-prompt.txt', cliArgs.systemPrompt));
+    } else {
+      args.push('--system-prompt', cliArgs.systemPrompt);
+    }
   }
 
   // Build merged MCP config: client tool bridge + registry servers
@@ -84,8 +108,25 @@ export function buildArgs(cliArgs: CliArgs, config: Config): BuiltCliCommand {
     }
   }
 
+  // The tool bridge's definitions are the usual reason a request is too big, and they are
+  // doubly exposed: they sit inside the --mcp-config argument here, and the CLI then passes
+  // them to the bridge as an environment variable when it launches it. Both are capped, and
+  // the second failure is the quieter one — the bridge simply never starts, so the tools
+  // appear not to exist rather than reporting an error.
+  for (const server of Object.values(mcpServers)) {
+    const defs = server.env?.TOOL_DEFINITIONS;
+    if (defs && tooBig(defs)) {
+      delete server.env!.TOOL_DEFINITIONS;
+      server.env!.TOOL_DEFINITIONS_FILE = temp.write('tool-definitions.json', defs);
+    }
+  }
+
   args.push('--strict-mcp-config');
-  args.push('--mcp-config', JSON.stringify({ mcpServers }));
+  const mcpConfigJson = JSON.stringify({ mcpServers });
+  args.push(
+    '--mcp-config',
+    tooBig(mcpConfigJson) ? temp.write('mcp-config.json', mcpConfigJson) : mcpConfigJson,
+  );
 
   // Disable built-in tools (user-defined MCP tools still work)
   args.push('--tools', '');
@@ -96,5 +137,5 @@ export function buildArgs(cliArgs: CliArgs, config: Config): BuiltCliCommand {
   }
 
   // Prompt goes via stdin, not as a positional arg
-  return { args, prompt: cliArgs.prompt, extraEnv };
+  return { args, prompt: cliArgs.prompt, extraEnv, cleanup: temp.cleanup };
 }

@@ -195,7 +195,7 @@ export async function handleChatCompletions(
   }
 
   const cliArgs = translateAnthropicRequest(anthropicRequest);
-  const { args, prompt, extraEnv } = buildArgs(cliArgs, config);
+  const { args, prompt, extraEnv, cleanup } = buildArgs(cliArgs, config);
 
   logger.debug('Spawning CLI for OpenAI request', {
     model: body.model,
@@ -203,7 +203,7 @@ export async function handleChatCompletions(
     messageCount: body.messages.length,
   });
 
-  const { events, kill } = spawnCli(args, prompt, config.requestTimeoutMs, extraEnv);
+  const { events, kill } = spawnCli(args, prompt, config.requestTimeoutMs, extraEnv, cleanup);
 
   req.on('close', () => {
     logger.debug('Client disconnected, killing CLI process');
